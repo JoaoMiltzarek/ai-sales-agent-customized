@@ -1,19 +1,23 @@
 # ai-sales-agent-customized
 
-MVP para gerar respostas comerciais personalizadas com base no tipo de negócio, no contexto da empresa e na mensagem do cliente.
-
-## Visão geral
+MVP para gerar respostas comerciais personalizadas...
 
 ## 📷 Preview do produto
 
 <p align="center">
-  <img src="./home.png" width="900"/>
+  <img src="./home.png" width="800"/>
 </p>
 
 <p align="center">
-  <img src="./form.png" width="45%"/>
-  <img src="./result.png" width="45%"/>
+  <img src="./form.png" width="800"/>
 </p>
+
+<p align="center">
+  <img src="./result.png" width="800"/>
+</p>
+
+## Visão geral
+...
 
 `ai-sales-agent-customized` é um projeto de portfólio criado para demonstrar, de forma simples e objetiva, como um fluxo com IA pode apoiar atendimento comercial.
 
