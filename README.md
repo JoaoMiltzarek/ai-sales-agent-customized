@@ -4,6 +4,12 @@ MVP para gerar respostas comerciais personalizadas com base no tipo de negócio,
 
 ## Visão geral
 
+<p align="center">
+  <img src="./home.png" width="30%"/>
+  <img src="./form.png" width="30%"/>
+  <img src="./result.png" width="30%"/>
+</p>
+
 `ai-sales-agent-customized` é um projeto de portfólio criado para demonstrar, de forma simples e objetiva, como um fluxo com IA pode apoiar atendimento comercial.
 
 A aplicação recebe informações básicas do negócio e da conversa, organiza um prompt interno e retorna uma resposta pronta para uso. Quando a API da OpenAI não está disponível, o sistema continua funcionando com um fallback local.
