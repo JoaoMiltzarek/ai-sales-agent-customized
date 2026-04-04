@@ -4,10 +4,15 @@ MVP para gerar respostas comerciais personalizadas com base no tipo de negócio,
 
 ## Visão geral
 
+## 📷 Preview do produto
+
 <p align="center">
-  <img src="./home.png" width="30%"/>
-  <img src="./form.png" width="30%"/>
-  <img src="./result.png" width="30%"/>
+  <img src="./home.png" width="900"/>
+</p>
+
+<p align="center">
+  <img src="./form.png" width="45%"/>
+  <img src="./result.png" width="45%"/>
 </p>
 
 `ai-sales-agent-customized` é um projeto de portfólio criado para demonstrar, de forma simples e objetiva, como um fluxo com IA pode apoiar atendimento comercial.
