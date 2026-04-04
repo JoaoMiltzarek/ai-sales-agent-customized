@@ -4,7 +4,7 @@ MVP para gerar respostas comerciais personalizadas...
 
 ## 🌐 Live Demo
 
-https://ai-sales-agent-customized-qly5zvjwk.vercel.app/
+ai-sales-agent-customized-qly5zvjwk.vercel.app/
 
 ## 📷 Preview do produto
 
