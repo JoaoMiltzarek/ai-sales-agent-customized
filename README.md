@@ -1,5 +1,10 @@
 # ai-sales-agent-customized
 
+![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)
+![Next.js](https://img.shields.io/badge/Next.js-000?style=flat&logo=nextdotjs)
+![Vercel](https://img.shields.io/badge/Deploy-Vercel-000?style=flat&logo=vercel)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+
 MVP para gerar respostas comerciais personalizadas...
 
 ## 🌐 Live Demo
