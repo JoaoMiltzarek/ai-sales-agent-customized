@@ -1,16 +1,17 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useState } from "react";
-
-type SalesFormData = {
-  businessType: string;
-  companyName: string;
-  tone: string;
-  objective: string;
-  customerMessage: string;
-};
+import { buildSalesPrompt, type SalesFormData } from "../lib/buildSalesPrompt";
+import { buildFallbackResponse } from "../lib/buildFallbackResponse";
 
 type SalesFormErrors = Partial<Record<keyof SalesFormData, string>>;
+type GenerateResponsePayload = {
+  prompt?: string;
+  responseText?: string;
+  error?: string;
+  source?: "openai" | "fallback";
+  notice?: string;
+};
 
 const businessTypeOptions = [
   { value: "restaurante", label: "Restaurante" },
@@ -91,6 +92,14 @@ export default function Home() {
   const [formData, setFormData] = useState<SalesFormData>(initialFormData);
   const [errors, setErrors] = useState<SalesFormErrors>({});
   const [submittedData, setSubmittedData] = useState<SalesFormData | null>(null);
+  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
+  const [generatedResponse, setGeneratedResponse] = useState<string | null>(null);
+  const [apiError, setApiError] = useState<string | null>(null);
+  const [responseSource, setResponseSource] = useState<
+    "openai" | "fallback" | null
+  >(null);
+  const [responseNotice, setResponseNotice] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
@@ -110,7 +119,7 @@ export default function Home() {
     }
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const validationErrors = validateForm(formData);
@@ -118,17 +127,73 @@ export default function Home() {
     if (Object.keys(validationErrors).length > 0) {
       setErrors(validationErrors);
       setSubmittedData(null);
+      setGeneratedPrompt(null);
+      setGeneratedResponse(null);
+      setApiError(null);
+      setResponseSource(null);
+      setResponseNotice(null);
       return;
     }
 
-    setErrors({});
-    setSubmittedData({
+    const cleanFormData = {
       businessType: formData.businessType,
       companyName: formData.companyName.trim(),
       tone: formData.tone,
       objective: formData.objective.trim(),
       customerMessage: formData.customerMessage.trim(),
-    });
+    };
+
+    setErrors({});
+    setSubmittedData(cleanFormData);
+    setGeneratedPrompt(buildSalesPrompt(cleanFormData));
+    setGeneratedResponse(null);
+    setApiError(null);
+    setResponseSource(null);
+    setResponseNotice(null);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(cleanFormData),
+      });
+
+      const payload = (await response.json().catch(() => null)) as
+        | GenerateResponsePayload
+        | null;
+
+      if (!response.ok) {
+        setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
+        setGeneratedResponse(null);
+        setApiError(
+          payload?.error ?? "Nao foi possivel gerar a resposta agora.",
+        );
+        setResponseSource(null);
+        setResponseNotice(null);
+        return;
+      }
+
+      setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
+      setGeneratedResponse(payload?.responseText ?? null);
+      setApiError(null);
+      setResponseSource(payload?.source ?? "openai");
+      setResponseNotice(payload?.notice ?? null);
+    } catch {
+      const prompt = buildSalesPrompt(cleanFormData);
+
+      setGeneratedPrompt(prompt);
+      setGeneratedResponse(buildFallbackResponse(cleanFormData, prompt));
+      setApiError(null);
+      setResponseSource("fallback");
+      setResponseNotice(
+        "Resposta local gerada porque a rota nao conseguiu concluir a chamada.",
+      );
+    } finally {
+      setIsLoading(false);
+    }
   }
 
   const inputClassName =
@@ -195,8 +260,8 @@ export default function Home() {
                   Dados para montar a resposta comercial
                 </h2>
                 <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
-                  Nesta etapa, o envio apenas organiza e mostra os dados
-                  preenchidos. Nenhuma API sera chamada ainda.
+                  Nesta etapa, o formulario envia os dados para uma rota simples
+                  da aplicacao, monta o prompt e busca a resposta da IA.
                 </p>
               </div>
             </div>
@@ -313,58 +378,122 @@ export default function Home() {
 
                 <button
                   type="submit"
+                  disabled={isLoading}
                   className="inline-flex items-center justify-center rounded-full bg-[var(--foreground)] px-6 py-3 text-sm font-semibold text-white transition hover:opacity-92"
                 >
-                  Gerar resposta
+                  {isLoading ? "Gerando..." : "Gerar resposta"}
                 </button>
               </div>
             </form>
           </div>
 
           {submittedData ? (
-            <div className="mt-6 rounded-[2rem] border border-[var(--line)] bg-white/70 p-6 shadow-[0_18px_50px_rgba(45,39,25,0.08)] backdrop-blur-sm">
-              <div className="space-y-2">
-                <span className="inline-flex w-fit rounded-full border border-[var(--line)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
-                  Dados preenchidos
-                </span>
-                <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">
-                  Resumo do envio
-                </h3>
-                <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
-                  Esta area mostra exatamente o que foi enviado pelo formulario.
-                </p>
+            <div className="mt-6 space-y-6">
+              <div className="rounded-[2rem] border border-[var(--line)] bg-white/70 p-6 shadow-[0_18px_50px_rgba(45,39,25,0.08)] backdrop-blur-sm">
+                <div className="space-y-2">
+                  <span className="inline-flex w-fit rounded-full border border-[var(--line)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                    Dados preenchidos
+                  </span>
+                  <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">
+                    Resumo do envio
+                  </h3>
+                  <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
+                    Esta area mostra exatamente o que foi enviado pelo formulario.
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  {summaryFields.map((field) => (
+                    <div
+                      key={field.key}
+                      className="rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-4"
+                    >
+                      <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                        {field.label}
+                      </p>
+                      <p className="mt-3 text-sm leading-7 text-[var(--foreground)] sm:text-base">
+                        {field.key === "businessType"
+                          ? getOptionLabel(
+                              submittedData.businessType,
+                              businessTypeOptions,
+                            )
+                          : field.key === "tone"
+                            ? getOptionLabel(submittedData.tone, toneOptions)
+                            : submittedData[field.key]}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-4 rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                    Mensagem do cliente
+                  </p>
+                  <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--foreground)] sm:text-base">
+                    {submittedData.customerMessage}
+                  </p>
+                </div>
               </div>
 
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                {summaryFields.map((field) => (
-                  <div
-                    key={field.key}
-                    className="rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-4"
-                  >
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                      {field.label}
-                    </p>
-                    <p className="mt-3 text-sm leading-7 text-[var(--foreground)] sm:text-base">
-                      {field.key === "businessType"
-                        ? getOptionLabel(
-                            submittedData.businessType,
-                            businessTypeOptions,
-                          )
-                        : field.key === "tone"
-                          ? getOptionLabel(submittedData.tone, toneOptions)
-                          : submittedData[field.key]}
+              <div className="rounded-[2rem] border border-[var(--line)] bg-[rgba(26,26,23,0.94)] p-6 text-white shadow-[0_18px_50px_rgba(20,20,18,0.18)]">
+                <div className="space-y-2">
+                  <span className="inline-flex w-fit rounded-full border border-white/15 bg-white/6 px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-white/70">
+                    Prompt gerado
+                  </span>
+                  <h3 className="text-2xl font-semibold tracking-[-0.03em] text-white">
+                    Prompt interno montado pela regra local
+                  </h3>
+                  <p className="text-sm leading-7 text-white/70 sm:text-base">
+                    Este texto sera a base da personalizacao antes de conectar a
+                    API nas proximas etapas.
+                  </p>
+                </div>
+
+                <pre className="mt-6 overflow-x-auto rounded-[1.5rem] border border-white/10 bg-white/5 p-5 text-sm leading-7 whitespace-pre-wrap text-white/90">
+                  {generatedPrompt}
+                </pre>
+              </div>
+
+              <div className="rounded-[2rem] border border-[var(--line)] bg-white/70 p-6 shadow-[0_18px_50px_rgba(45,39,25,0.08)] backdrop-blur-sm">
+                <div className="space-y-2">
+                  <span className="inline-flex w-fit rounded-full border border-[var(--line)] px-3 py-1 text-xs font-semibold uppercase tracking-[0.22em] text-[var(--muted)]">
+                    Resposta da IA
+                  </span>
+                  <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)]">
+                    Resultado gerado
+                  </h3>
+                  <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
+                    A resposta final da IA aparece aqui logo abaixo do prompt.
+                  </p>
+                  {responseSource === "fallback" ? (
+                    <span className="inline-flex w-fit rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                      Fallback local
+                    </span>
+                  ) : null}
+                </div>
+
+                {apiError ? (
+                  <div className="mt-6 rounded-[1.5rem] border border-red-200 bg-red-50 p-4 text-sm leading-7 text-red-800">
+                    {apiError}
+                  </div>
+                ) : generatedResponse ? (
+                  <div className="mt-6 rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-5">
+                    {responseNotice ? (
+                      <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
+                        {responseNotice}
+                      </p>
+                    ) : null}
+                    <p className="whitespace-pre-wrap text-sm leading-7 text-[var(--foreground)] sm:text-base">
+                      {generatedResponse}
                     </p>
                   </div>
-                ))}
-              </div>
-
-              <div className="mt-4 rounded-[1.5rem] border border-[var(--line)] bg-[var(--surface)] p-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--muted)]">
-                  Mensagem do cliente
-                </p>
-                <p className="mt-3 whitespace-pre-wrap text-sm leading-7 text-[var(--foreground)] sm:text-base">
-                  {submittedData.customerMessage}
-                </p>
+                ) : (
+                  <div className="mt-6 rounded-[1.5rem] border border-dashed border-[var(--line-strong)] bg-white/45 p-4 text-sm leading-7 text-[var(--muted)]">
+                    {isLoading
+                      ? "A resposta esta sendo gerada."
+                      : "A resposta aparecera aqui depois do envio."}
+                  </div>
+                )}
               </div>
             </div>
           ) : null}
