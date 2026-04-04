@@ -5,7 +5,7 @@
 ![Vercel](https://img.shields.io/badge/Deploy-Vercel-000?style=flat&logo=vercel)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 
-MVP para gerar respostas comerciais personalizadas...
+MVP para gerar respostas comerciais personalizadas por nicho, tom de voz e objetivo de atendimento.
 
 ## 🌐 Live Demo
 
@@ -26,7 +26,6 @@ https://ai-sales-agent-customized-qly5zvjwk.vercel.app/
 </p>
 
 ## Visão geral
-...
 
 `ai-sales-agent-customized` é um projeto de portfólio criado para demonstrar, de forma simples e objetiva, como um fluxo com IA pode apoiar atendimento comercial.
 
@@ -55,6 +54,12 @@ O fluxo principal da aplicação é:
 3. A rota da API envia esse prompt para a OpenAI.
 4. A resposta gerada volta para a interface.
 5. Se a API falhar ou não houver chave configurada, o sistema usa um fallback local para manter a experiência funcionando.
+
+```
+Formulário → buildSalesPrompt() → POST /api/generate → OpenAI API → Resposta
+                                          ↓ (fallback)
+                                  buildFallbackResponse()
+```
 
 ## Valor do projeto
 
@@ -129,7 +134,7 @@ Quando a variável `OPENAI_API_KEY` está disponível:
 
 Modelo utilizado atualmente:
 
-- `gpt-5-mini`
+- `gpt-4o-mini`
 
 ## Fallback local
 
@@ -206,25 +211,14 @@ lib/
   buildFallbackResponse.ts
 ```
 
-## Próximos passos
+## 🗺️ Roadmap
 
-Possíveis evoluções do projeto:
-
-- melhorar ainda mais a heurística do fallback local
-- adicionar exemplos reais de prompts e respostas
-- incluir testes básicos para a rota e para as funções de geração
-- permitir configuração simples de dados do negócio, como horário e endereço
-- criar uma versão com persistência opcional para histórico de respostas
-
-## Screenshots
-
-Espaço reservado para screenshots do projeto:
-
-- Home com formulário preenchido
-- Prompt gerado
-- Resposta final
-- Exemplo de fallback local
+- [ ] melhorar a heurística do fallback local
+- [ ] adicionar exemplos reais de prompts e respostas
+- [ ] incluir testes básicos para a rota e funções de geração
+- [ ] permitir configuração de dados do negócio (horário, endereço)
+- [ ] versão com persistência para histórico de respostas
 
 ## Status
 
-Projeto funcional e pronto para apresentação como MVP de portfólio.
+✅ MVP funcional — deploy ativo na Vercel.
