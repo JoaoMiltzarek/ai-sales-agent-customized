@@ -237,7 +237,7 @@ export default function Home() {
     Boolean(generatedPrompt),
     Boolean(generatedResponse || apiError || isLoading),
   ];
-  const responseCardClassName = `panel-shell panel-soft response-panel p-6 sm:p-8${
+  const responseCardClassName = `panel-shell panel-soft response-panel p-7 sm:p-9${
     generatedResponse || apiError || isLoading
       ? " response-panel-active surface-reveal"
       : ""
@@ -535,7 +535,7 @@ export default function Home() {
                 </div>
 
                 <div className={responseCardClassName}>
-                  <div className="mx-auto w-full max-w-[720px] space-y-3">
+                  <div className="mx-auto w-full max-w-[660px] space-y-7">
                     <div className="space-y-2">
                       <span className="status-badge status-badge-soft">
                         Resposta final
@@ -547,12 +547,12 @@ export default function Home() {
                   </div>
 
                   {apiError ? (
-                    <div className="error-surface mx-auto mt-7 w-full max-w-[720px] rounded-[1.75rem] p-7 shadow-[0_14px_36px_rgba(15,23,42,0.06)] sm:mt-8 sm:p-8">
+                    <div className="error-surface w-full rounded-[1.75rem] p-7 shadow-[0_14px_36px_rgba(15,23,42,0.06)] sm:p-8">
                       {apiError}
                     </div>
                   ) : generatedResponse ? (
                     <div
-                      className="response-surface mx-auto mt-7 w-full max-w-[720px] rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] sm:mt-8 sm:p-8"
+                      className="response-surface w-full rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] sm:p-8"
                       aria-live="polite"
                     >
                       <p className="whitespace-pre-wrap text-left text-[15px] leading-[1.68] text-[var(--foreground)] sm:text-base sm:leading-[1.68]">
@@ -560,7 +560,7 @@ export default function Home() {
                       </p>
                     </div>
                   ) : (
-                    <div className="empty-surface mx-auto mt-7 w-full max-w-[720px] rounded-[1.75rem] p-7 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:mt-8 sm:p-8">
+                    <div className="empty-surface w-full rounded-[1.75rem] p-7 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:p-8">
                       {isLoading
                         ? "A resposta esta sendo gerada."
                         : "A resposta aparecera aqui depois do envio."}
