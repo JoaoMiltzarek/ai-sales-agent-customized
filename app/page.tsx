@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useState } from "react";
 import { buildSalesPrompt } from "../lib/buildSalesPrompt";
 import { buildFallbackResponse } from "../lib/buildFallbackResponse";
 import { generateRequestMessages } from "../lib/schemas";
@@ -159,6 +159,22 @@ export default function Home() {
   >(null);
   const [responseNotice, setResponseNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isResultVisible, setIsResultVisible] = useState(false);
+
+  useEffect(() => {
+    if (!result) {
+      setIsResultVisible(false);
+      return;
+    }
+
+    const animationFrameId = requestAnimationFrame(() => {
+      setIsResultVisible(true);
+    });
+
+    return () => {
+      cancelAnimationFrame(animationFrameId);
+    };
+  }, [result]);
 
   function handleChange(
     event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
@@ -550,14 +566,18 @@ export default function Home() {
                     <button
                       type="submit"
                       disabled={isLoading}
-                      className="button-primary min-w-[220px]"
+                      className={`button-primary min-w-[220px]${
+                        isLoading ? " cursor-not-allowed opacity-90" : ""
+                      }`}
                     >
                       <span
                         className={`button-dot${
                           isLoading ? " button-dot-loading" : ""
                         }`}
                       />
-                      {isLoading ? "Gerando resposta..." : "Gerar resposta"}
+                      <span className={isLoading ? "animate-pulse" : ""}>
+                        {isLoading ? "Gerando..." : "Gerar resposta"}
+                      </span>
                     </button>
                   </div>
                 </form>
@@ -649,9 +669,23 @@ export default function Home() {
                     <div className="error-surface w-full rounded-[1.75rem] p-7 shadow-[0_14px_36px_rgba(15,23,42,0.06)] sm:p-8">
                       {apiError}
                     </div>
+                  ) : isLoading && !result ? (
+                    <div className="empty-surface w-full rounded-[1.75rem] p-7 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:p-8">
+                      <div
+                        className="space-y-4"
+                        aria-live="polite"
+                        aria-label="Gerando resposta"
+                      >
+                        <div className="h-4 w-full rounded bg-gray-200 animate-pulse" />
+                        <div className="h-4 w-5/6 rounded bg-gray-200 animate-pulse" />
+                        <div className="h-4 w-2/3 rounded bg-gray-200 animate-pulse" />
+                      </div>
+                    </div>
                   ) : result ? (
                     <div
-                      className="response-surface w-full rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] sm:p-8"
+                      className={`response-surface w-full rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition-opacity duration-500 sm:p-8 ${
+                        isResultVisible ? "opacity-100" : "opacity-0"
+                      }`}
                       aria-live="polite"
                     >
                       <p className="whitespace-pre-wrap text-left text-[15px] leading-[1.68] text-[var(--foreground)] sm:text-base sm:leading-[1.68]">
