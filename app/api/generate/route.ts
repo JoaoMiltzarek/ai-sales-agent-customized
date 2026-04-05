@@ -1,43 +1,11 @@
 import { openai } from "@ai-sdk/openai";
 import { streamText } from "ai";
 import { NextResponse } from "next/server";
-import {
-  buildSalesPrompt,
-  type SalesFormData,
-} from "../../../lib/buildSalesPrompt";
+import { buildSalesPrompt, type SalesFormData } from "../../../lib/buildSalesPrompt";
 import { buildFallbackResponse } from "../../../lib/buildFallbackResponse";
+import { GenerateRequestSchema } from "../../../lib/schemas";
 
 const OPENAI_MODEL = "gpt-5-mini";
-
-function isFilledString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
-}
-
-function sanitizeSalesFormData(value: unknown): SalesFormData | null {
-  if (!value || typeof value !== "object") {
-    return null;
-  }
-
-  const data = value as Partial<SalesFormData>;
-
-  if (
-    !isFilledString(data.businessType) ||
-    !isFilledString(data.companyName) ||
-    !isFilledString(data.tone) ||
-    !isFilledString(data.objective) ||
-    !isFilledString(data.customerMessage)
-  ) {
-    return null;
-  }
-
-  return {
-    businessType: data.businessType.trim(),
-    companyName: data.companyName.trim(),
-    tone: data.tone.trim(),
-    objective: data.objective.trim(),
-    customerMessage: data.customerMessage.trim(),
-  };
-}
 
 function createFallbackResult(formData: SalesFormData, prompt: string) {
   return NextResponse.json({
@@ -60,15 +28,16 @@ export async function POST(request: Request) {
     );
   }
 
-  const formData = sanitizeSalesFormData(body);
+  const result = GenerateRequestSchema.safeParse(body);
 
-  if (!formData) {
+  if (!result.success) {
     return NextResponse.json(
-      { error: "Preencha todos os campos principais antes de enviar." },
+      { errors: result.error.flatten().fieldErrors },
       { status: 400 },
     );
   }
 
+  const formData = result.data;
   const prompt = buildSalesPrompt(formData);
 
   if (!process.env.OPENAI_API_KEY) {

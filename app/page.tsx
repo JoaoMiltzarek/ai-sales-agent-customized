@@ -1,14 +1,16 @@
 "use client";
 
 import { ChangeEvent, FormEvent, useState } from "react";
-import { buildSalesPrompt, type SalesFormData } from "../lib/buildSalesPrompt";
+import { buildSalesPrompt } from "../lib/buildSalesPrompt";
 import { buildFallbackResponse } from "../lib/buildFallbackResponse";
+import { generateRequestMessages } from "../lib/schemas";
+import type { FormErrors, GenerateRequest } from "../lib/types";
 
-type SalesFormErrors = Partial<Record<keyof SalesFormData, string>>;
 type GenerateResponsePayload = {
   prompt?: string;
   responseText?: string;
   error?: string;
+  errors?: Partial<Record<keyof GenerateRequest, string[] | undefined>>;
   source?: "openai" | "fallback";
   notice?: string;
 };
@@ -28,7 +30,7 @@ const toneOptions = [
   { value: "premium", label: "Premium" },
 ];
 
-const initialFormData: SalesFormData = {
+const initialFormData: GenerateRequest = {
   businessType: "",
   companyName: "",
   tone: "",
@@ -95,27 +97,47 @@ function getOptionLabel(
   return options.find((option) => option.value === value)?.label ?? value;
 }
 
-function validateForm(data: SalesFormData) {
-  const errors: SalesFormErrors = {};
+const formFieldNames = Object.keys(initialFormData) as Array<
+  keyof GenerateRequest
+>;
+
+function validateForm(data: GenerateRequest) {
+  const errors: FormErrors = {};
 
   if (!data.businessType) {
-    errors.businessType = "Selecione o tipo de negocio.";
+    errors.businessType = generateRequestMessages.businessType;
   }
 
   if (!data.companyName.trim()) {
-    errors.companyName = "Informe o nome da empresa.";
+    errors.companyName = generateRequestMessages.companyName;
   }
 
   if (!data.tone) {
-    errors.tone = "Selecione o tom de voz.";
+    errors.tone = generateRequestMessages.tone;
   }
 
   if (!data.objective.trim()) {
-    errors.objective = "Informe o objetivo da resposta.";
+    errors.objective = generateRequestMessages.objective;
   }
 
   if (!data.customerMessage.trim()) {
-    errors.customerMessage = "Escreva a mensagem do cliente.";
+    errors.customerMessage = generateRequestMessages.customerMessage;
+  }
+
+  return errors;
+}
+
+function normalizeFieldErrors(
+  fieldErrors?: Partial<Record<keyof GenerateRequest, string[] | undefined>>,
+) {
+  const errors: FormErrors = {};
+
+  for (const fieldName of formFieldNames) {
+    const message = fieldErrors?.[fieldName]?.[0];
+
+    if (message) {
+      errors[fieldName] = message;
+    }
   }
 
   return errors;
@@ -126,9 +148,9 @@ function isJsonResponse(response: Response) {
 }
 
 export default function Home() {
-  const [formData, setFormData] = useState<SalesFormData>(initialFormData);
-  const [errors, setErrors] = useState<SalesFormErrors>({});
-  const [submittedData, setSubmittedData] = useState<SalesFormData | null>(null);
+  const [formData, setFormData] = useState<GenerateRequest>(initialFormData);
+  const [errors, setErrors] = useState<FormErrors>({});
+  const [submittedData, setSubmittedData] = useState<GenerateRequest | null>(null);
   const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
   const [result, setResult] = useState("");
   const [apiError, setApiError] = useState<string | null>(null);
@@ -148,7 +170,7 @@ export default function Home() {
       [name]: value,
     }));
 
-    if (errors[name as keyof SalesFormData]) {
+    if (errors[name as keyof GenerateRequest]) {
       setErrors((currentErrors) => ({
         ...currentErrors,
         [name]: undefined,
@@ -158,6 +180,7 @@ export default function Home() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setErrors({});
 
     const validationErrors = validateForm(formData);
 
@@ -172,7 +195,7 @@ export default function Home() {
       return;
     }
 
-    const cleanFormData = {
+    const cleanFormData: GenerateRequest = {
       businessType: formData.businessType,
       companyName: formData.companyName.trim(),
       tone: formData.tone,
@@ -202,6 +225,19 @@ export default function Home() {
         const payload = (await response.json().catch(() => null)) as
           | GenerateResponsePayload
           | null;
+
+        if (response.status === 400 && payload?.errors) {
+          const fieldErrors = normalizeFieldErrors(payload.errors);
+
+          setErrors(fieldErrors);
+          setSubmittedData(null);
+          setGeneratedPrompt(null);
+          setResult("");
+          setApiError(null);
+          setResponseSource(null);
+          setResponseNotice(null);
+          return;
+        }
 
         if (!response.ok) {
           setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
