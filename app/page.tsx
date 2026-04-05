@@ -121,12 +121,16 @@ function validateForm(data: SalesFormData) {
   return errors;
 }
 
+function isJsonResponse(response: Response) {
+  return response.headers.get("content-type")?.includes("application/json");
+}
+
 export default function Home() {
   const [formData, setFormData] = useState<SalesFormData>(initialFormData);
   const [errors, setErrors] = useState<SalesFormErrors>({});
   const [submittedData, setSubmittedData] = useState<SalesFormData | null>(null);
   const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
-  const [generatedResponse, setGeneratedResponse] = useState<string | null>(null);
+  const [result, setResult] = useState("");
   const [apiError, setApiError] = useState<string | null>(null);
   const [responseSource, setResponseSource] = useState<
     "openai" | "fallback" | null
@@ -161,7 +165,7 @@ export default function Home() {
       setErrors(validationErrors);
       setSubmittedData(null);
       setGeneratedPrompt(null);
-      setGeneratedResponse(null);
+      setResult("");
       setApiError(null);
       setResponseSource(null);
       setResponseNotice(null);
@@ -179,7 +183,7 @@ export default function Home() {
     setErrors({});
     setSubmittedData(cleanFormData);
     setGeneratedPrompt(buildSalesPrompt(cleanFormData));
-    setGeneratedResponse(null);
+    setResult("");
     setApiError(null);
     setResponseSource(null);
     setResponseNotice(null);
@@ -194,31 +198,90 @@ export default function Home() {
         body: JSON.stringify(cleanFormData),
       });
 
-      const payload = (await response.json().catch(() => null)) as
-        | GenerateResponsePayload
-        | null;
+      if (isJsonResponse(response)) {
+        const payload = (await response.json().catch(() => null)) as
+          | GenerateResponsePayload
+          | null;
+
+        if (!response.ok) {
+          setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
+          setResult("");
+          setApiError(
+            payload?.error ?? "Nao foi possivel gerar a resposta agora.",
+          );
+          setResponseSource(null);
+          setResponseNotice(null);
+          return;
+        }
+
+        setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
+        setResult(payload?.responseText ?? "");
+        setApiError(null);
+        setResponseSource(payload?.source ?? "fallback");
+        setResponseNotice(payload?.notice ?? null);
+        return;
+      }
 
       if (!response.ok) {
-        setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
-        setGeneratedResponse(null);
-        setApiError(
-          payload?.error ?? "Nao foi possivel gerar a resposta agora.",
-        );
+        setResult("");
+        setApiError("Nao foi possivel gerar a resposta agora.");
         setResponseSource(null);
         setResponseNotice(null);
         return;
       }
 
-      setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
-      setGeneratedResponse(payload?.responseText ?? null);
+      if (!response.body) {
+        throw new Error("A rota nao retornou stream.");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamedText = "";
+
       setApiError(null);
-      setResponseSource(payload?.source ?? "openai");
-      setResponseNotice(payload?.notice ?? null);
+      setResponseSource("openai");
+      setResponseNotice(null);
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        const chunk = decoder.decode(value, { stream: true });
+
+        if (!chunk) {
+          continue;
+        }
+
+        streamedText += chunk;
+        setResult((currentResult) => currentResult + chunk);
+      }
+
+      const finalChunk = decoder.decode();
+
+      if (finalChunk) {
+        streamedText += finalChunk;
+        setResult((currentResult) => currentResult + finalChunk);
+      }
+
+      if (!streamedText.trim()) {
+        const prompt = buildSalesPrompt(cleanFormData);
+
+        setGeneratedPrompt(prompt);
+        setResult(buildFallbackResponse(cleanFormData, prompt));
+        setApiError(null);
+        setResponseSource("fallback");
+        setResponseNotice(
+          "Resposta local gerada porque a OpenAI nao retornou texto utilizavel.",
+        );
+      }
     } catch {
       const prompt = buildSalesPrompt(cleanFormData);
 
       setGeneratedPrompt(prompt);
-      setGeneratedResponse(buildFallbackResponse(cleanFormData, prompt));
+      setResult(buildFallbackResponse(cleanFormData, prompt));
       setApiError(null);
       setResponseSource("fallback");
       setResponseNotice(
@@ -235,10 +298,10 @@ export default function Home() {
   const pipelineState = [
     true,
     Boolean(generatedPrompt),
-    Boolean(generatedResponse || apiError || isLoading),
+    Boolean(result || apiError || isLoading),
   ];
   const responseCardClassName = `panel-shell panel-soft response-panel p-7 sm:p-9${
-    generatedResponse || apiError || isLoading
+    result || apiError || isLoading
       ? " response-panel-active surface-reveal"
       : ""
   }`;
@@ -550,13 +613,13 @@ export default function Home() {
                     <div className="error-surface w-full rounded-[1.75rem] p-7 shadow-[0_14px_36px_rgba(15,23,42,0.06)] sm:p-8">
                       {apiError}
                     </div>
-                  ) : generatedResponse ? (
+                  ) : result ? (
                     <div
                       className="response-surface w-full rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] sm:p-8"
                       aria-live="polite"
                     >
                       <p className="whitespace-pre-wrap text-left text-[15px] leading-[1.68] text-[var(--foreground)] sm:text-base sm:leading-[1.68]">
-                        {generatedResponse}
+                        {result}
                       </p>
                     </div>
                   ) : (
