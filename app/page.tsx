@@ -1,776 +1,1375 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
-import { buildSalesPrompt } from "../lib/buildSalesPrompt";
-import { buildFallbackResponse } from "../lib/buildFallbackResponse";
-import { generateRequestMessages } from "../lib/schemas";
-import { loadBusinessConfig, saveBusinessConfig } from "../lib/storage";
-import type { FormErrors, GenerateRequest } from "../lib/types";
+import { useEffect, useRef, useState } from "react";
 
-type GenerateResponsePayload = {
-  prompt?: string;
-  responseText?: string;
-  error?: string;
-  errors?: Partial<Record<keyof GenerateRequest, string[] | undefined>>;
-  source?: "openai" | "fallback";
-  notice?: string;
+type SubmitValues = {
+  companyName: string;
+  businessType: string;
+  tone: string;
+  objective: string;
+  clientMessage: string;
 };
 
-const businessTypeOptions = [
+const businessOptions = [
+  { value: "", label: "Selecionar" },
   { value: "restaurante", label: "Restaurante" },
-  { value: "oficina", label: "Oficina" },
+  { value: "oficina", label: "Oficina Mecanica" },
   { value: "clinica", label: "Clinica" },
-  { value: "pet shop", label: "Pet shop" },
+  { value: "petshop", label: "Pet Shop" },
   { value: "outro", label: "Outro" },
 ];
 
 const toneOptions = [
+  { value: "", label: "Selecionar" },
   { value: "profissional", label: "Profissional" },
   { value: "amigavel", label: "Amigavel" },
   { value: "direto", label: "Direto" },
   { value: "premium", label: "Premium" },
 ];
 
-const initialFormData: GenerateRequest = {
-  businessType: "",
-  companyName: "",
-  tone: "",
-  objective: "",
-  customerMessage: "",
-};
-
-const summaryFields = [
-  {
-    key: "businessType",
-    label: "Tipo de negocio",
-  },
-  {
-    key: "companyName",
-    label: "Nome da empresa",
-  },
-  {
-    key: "tone",
-    label: "Tom de voz",
-  },
-  {
-    key: "objective",
-    label: "Objetivo da resposta",
-  },
-] as const;
-
-const heroSignals = [
-  {
-    label: "Fluxo",
-    value: "Formulario, prompt e resposta",
-    description: "Tudo na mesma tela.",
-  },
-  {
-    label: "Seguranca",
-    value: "API key protegida no servidor",
-    description: "Nada sensivel no frontend.",
-  },
-  {
-    label: "Fallback",
-    value: "Resposta local quando a API falha",
-    description: "O sistema continua util.",
-  },
+const workflowSteps = [
+  "Configure seu negocio",
+  "Descreva a situacao",
+  "Copie a resposta gerada",
 ];
 
-const pipelineStages = [
-  {
-    title: "Formulario",
-    text: "Capta contexto e objetivo.",
-  },
-  {
-    title: "Prompt",
-    text: "Monta a instrucao interna.",
-  },
-  {
-    title: "Resposta",
-    text: "Entrega a saida final.",
-  },
-];
+function mapBusinessTypeFromStorage(value: string) {
+  if (value === "pet shop") {
+    return "petshop";
+  }
 
-function getOptionLabel(
-  value: string,
-  options: Array<{ value: string; label: string }>,
-) {
-  return options.find((option) => option.value === value)?.label ?? value;
+  return value;
 }
 
-const formFieldNames = Object.keys(initialFormData) as Array<
-  keyof GenerateRequest
->;
-
-function validateForm(data: GenerateRequest) {
-  const errors: FormErrors = {};
-
-  if (!data.businessType) {
-    errors.businessType = generateRequestMessages.businessType;
+function mapBusinessTypeForApi(value: string) {
+  if (value === "petshop") {
+    return "pet shop";
   }
 
-  if (!data.companyName.trim()) {
-    errors.companyName = generateRequestMessages.companyName;
-  }
-
-  if (!data.tone) {
-    errors.tone = generateRequestMessages.tone;
-  }
-
-  if (!data.objective.trim()) {
-    errors.objective = generateRequestMessages.objective;
-  }
-
-  if (!data.customerMessage.trim()) {
-    errors.customerMessage = generateRequestMessages.customerMessage;
-  }
-
-  return errors;
+  return value;
 }
 
-function normalizeFieldErrors(
-  fieldErrors?: Partial<Record<keyof GenerateRequest, string[] | undefined>>,
-) {
-  const errors: FormErrors = {};
+function normalizeValues(values: SubmitValues): SubmitValues {
+  return {
+    companyName: values.companyName.trim(),
+    businessType: values.businessType.trim(),
+    tone: values.tone.trim(),
+    objective: values.objective.trim(),
+    clientMessage: values.clientMessage.trim(),
+  };
+}
 
-  for (const fieldName of formFieldNames) {
-    const message = fieldErrors?.[fieldName]?.[0];
-
-    if (message) {
-      errors[fieldName] = message;
-    }
+function readErrorMessage(value: unknown) {
+  if (typeof value === "string") {
+    return value;
   }
 
-  return errors;
+  if (Array.isArray(value)) {
+    const firstMessage = value.find((item) => typeof item === "string");
+
+    return typeof firstMessage === "string" ? firstMessage : undefined;
+  }
+
+  return undefined;
 }
 
-function isJsonResponse(response: Response) {
-  return response.headers.get("content-type")?.includes("application/json");
+function normalizeServerErrors(value: unknown) {
+  const nextErrors: Record<string, string> = {};
+
+  if (!value || typeof value !== "object") {
+    return nextErrors;
+  }
+
+  const source = value as Record<string, unknown>;
+
+  const businessTypeError = readErrorMessage(source.businessType);
+  const companyNameError = readErrorMessage(source.companyName);
+  const toneError = readErrorMessage(source.tone);
+  const objectiveError = readErrorMessage(source.objective);
+  const clientMessageError =
+    readErrorMessage(source.clientMessage) ??
+    readErrorMessage(source.customerMessage);
+
+  if (businessTypeError) {
+    nextErrors.businessType = businessTypeError;
+  }
+
+  if (companyNameError) {
+    nextErrors.companyName = companyNameError;
+  }
+
+  if (toneError) {
+    nextErrors.tone = toneError;
+  }
+
+  if (objectiveError) {
+    nextErrors.objective = objectiveError;
+  }
+
+  if (clientMessageError) {
+    nextErrors.clientMessage = clientMessageError;
+  }
+
+  return nextErrors;
 }
 
-export default function Home() {
-  const [formData, setFormData] = useState<GenerateRequest>(initialFormData);
-  const [errors, setErrors] = useState<FormErrors>({});
-  const [submittedData, setSubmittedData] = useState<GenerateRequest | null>(null);
-  const [generatedPrompt, setGeneratedPrompt] = useState<string | null>(null);
+export default function Page() {
+  const [companyName, setCompanyName] = useState("");
+  const [businessType, setBusinessType] = useState("");
+  const [tone, setTone] = useState("");
+  const [objective, setObjective] = useState("");
+  const [clientMessage, setClientMessage] = useState("");
   const [result, setResult] = useState("");
-  const [apiError, setApiError] = useState<string | null>(null);
-  const [responseSource, setResponseSource] = useState<
-    "openai" | "fallback" | null
-  >(null);
-  const [responseNotice, setResponseNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [isResultVisible, setIsResultVisible] = useState(false);
-  const [isSaveConfirmationVisible, setIsSaveConfirmationVisible] =
-    useState(false);
-  const saveConfirmationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
+  const [copied, setCopied] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const lastValuesRef = useRef<object | null>(null);
 
   useEffect(() => {
-    const savedConfig = loadBusinessConfig();
+    try {
+      const savedConfig = localStorage.getItem("sales_agent_config");
 
-    if (!savedConfig) {
-      return;
-    }
-
-    setFormData((currentData) => ({
-      ...currentData,
-      businessType: savedConfig.businessType,
-      companyName: savedConfig.companyName,
-      tone: savedConfig.tone,
-    }));
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (saveConfirmationTimeoutRef.current) {
-        clearTimeout(saveConfirmationTimeoutRef.current);
+      if (!savedConfig) {
+        return;
       }
-    };
+
+      const parsed = JSON.parse(savedConfig) as {
+        companyName?: unknown;
+        businessType?: unknown;
+        tone?: unknown;
+      };
+
+      if (typeof parsed.companyName === "string") {
+        setCompanyName(parsed.companyName);
+      }
+
+      if (typeof parsed.businessType === "string") {
+        setBusinessType(mapBusinessTypeFromStorage(parsed.businessType));
+      }
+
+      if (typeof parsed.tone === "string") {
+        setTone(parsed.tone);
+      }
+    } catch {
+      // Ignore invalid saved data and keep the default empty state.
+    }
   }, []);
 
-  useEffect(() => {
-    if (!result) {
-      setIsResultVisible(false);
-      return;
-    }
+  function clearError(fieldName: string) {
+    setErrors((currentErrors) => {
+      if (!currentErrors[fieldName] && !currentErrors.general) {
+        return currentErrors;
+      }
 
-    const animationFrameId = requestAnimationFrame(() => {
-      setIsResultVisible(true);
+      const nextErrors = { ...currentErrors };
+      delete nextErrors[fieldName];
+      delete nextErrors.general;
+      return nextErrors;
     });
+  }
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [result]);
-
-  function handleChange(
-    event: ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>,
-  ) {
-    const { name, value } = event.target;
-
-    setFormData((currentData) => ({
-      ...currentData,
-      [name]: value,
-    }));
-
-    if (errors[name as keyof GenerateRequest]) {
-      setErrors((currentErrors) => ({
-        ...currentErrors,
-        [name]: undefined,
-      }));
+  function handleSaveProfile() {
+    try {
+      localStorage.setItem(
+        "sales_agent_config",
+        JSON.stringify({ companyName, businessType, tone }),
+      );
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      setErrors({ general: "Nao foi possivel salvar o perfil agora." });
     }
   }
 
-  function handleSaveBusinessConfig() {
-    saveBusinessConfig({
-      businessType: formData.businessType,
-      companyName: formData.companyName,
-      tone: formData.tone,
-    });
-
-    setIsSaveConfirmationVisible(true);
-
-    if (saveConfirmationTimeoutRef.current) {
-      clearTimeout(saveConfirmationTimeoutRef.current);
-    }
-
-    saveConfirmationTimeoutRef.current = setTimeout(() => {
-      setIsSaveConfirmationVisible(false);
-      saveConfirmationTimeoutRef.current = null;
-    }, 2000);
-  }
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  async function handleSubmit(overrideValues?: SubmitValues) {
     setErrors({});
-
-    const validationErrors = validateForm(formData);
-
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
-      setSubmittedData(null);
-      setGeneratedPrompt(null);
-      setResult("");
-      setApiError(null);
-      setResponseSource(null);
-      setResponseNotice(null);
-      return;
-    }
-
-    const cleanFormData: GenerateRequest = {
-      businessType: formData.businessType,
-      companyName: formData.companyName.trim(),
-      tone: formData.tone,
-      objective: formData.objective.trim(),
-      customerMessage: formData.customerMessage.trim(),
-    };
-
-    setErrors({});
-    setSubmittedData(cleanFormData);
-    setGeneratedPrompt(buildSalesPrompt(cleanFormData));
     setResult("");
-    setApiError(null);
-    setResponseSource(null);
-    setResponseNotice(null);
+    setCopied(false);
+
+    const sourceValues =
+      overrideValues ??
+      ({
+        businessType,
+        companyName,
+        tone,
+        objective,
+        clientMessage,
+      } satisfies SubmitValues);
+
+    const values = normalizeValues(sourceValues);
+    const nextErrors: Record<string, string> = {};
+
+    if (!values.companyName) {
+      nextErrors.companyName = "Campo obrigatorio";
+    }
+
+    if (!values.businessType) {
+      nextErrors.businessType = "Campo obrigatorio";
+    }
+
+    if (!values.tone) {
+      nextErrors.tone = "Campo obrigatorio";
+    }
+
+    if (!values.objective) {
+      nextErrors.objective = "Campo obrigatorio";
+    }
+
+    if (!values.clientMessage) {
+      nextErrors.clientMessage = "Campo obrigatorio";
+    }
+
+    if (Object.keys(nextErrors).length > 0) {
+      setErrors(nextErrors);
+      return;
+    }
+
+    if (overrideValues) {
+      setCompanyName(values.companyName);
+      setBusinessType(values.businessType);
+      setTone(values.tone);
+      setObjective(values.objective);
+      setClientMessage(values.clientMessage);
+    }
+
+    lastValuesRef.current = values;
     setIsLoading(true);
 
     try {
-      const response = await fetch("/api/generate", {
+      const res = await fetch("/api/generate", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(cleanFormData),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          businessType: mapBusinessTypeForApi(values.businessType),
+          companyName: values.companyName,
+          tone: values.tone,
+          objective: values.objective,
+          customerMessage: values.clientMessage,
+          clientMessage: values.clientMessage,
+        }),
       });
 
-      if (isJsonResponse(response)) {
-        const payload = (await response.json().catch(() => null)) as
-          | GenerateResponsePayload
-          | null;
+      if (res.headers.get("content-type")?.includes("text")) {
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
 
-        if (response.status === 400 && payload?.errors) {
-          const fieldErrors = normalizeFieldErrors(payload.errors);
+        if (!reader) {
+          throw new Error("No stream");
+        }
 
-          setErrors(fieldErrors);
-          setSubmittedData(null);
-          setGeneratedPrompt(null);
-          setResult("");
-          setApiError(null);
-          setResponseSource(null);
-          setResponseNotice(null);
+        let accumulated = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+
+          if (done) {
+            break;
+          }
+
+          const chunk = decoder.decode(value, { stream: true });
+          const text = chunk
+            .replace(/^data: /gm, "")
+            .replace(/\n\n/g, "\n")
+            .split("\n")
+            .filter((line) => line.trim() !== "[DONE]")
+            .join("\n");
+
+          if (text) {
+            accumulated += text;
+            setResult(accumulated);
+          }
+        }
+
+        const finalChunk = decoder.decode();
+        const finalText = finalChunk
+          .replace(/^data: /gm, "")
+          .replace(/\n\n/g, "\n")
+          .split("\n")
+          .filter((line) => line.trim() !== "[DONE]")
+          .join("\n");
+
+        if (finalText) {
+          accumulated += finalText;
+          setResult(accumulated);
+        }
+
+        if (!accumulated.trim()) {
+          setErrors({
+            general:
+              "Nenhum texto foi retornado. Tente novamente em alguns instantes.",
+          });
+        }
+      } else {
+        const data = (await res.json().catch(() => ({}))) as Record<
+          string,
+          unknown
+        >;
+
+        if (res.status === 400 && data.errors) {
+          setErrors(normalizeServerErrors(data.errors));
           return;
         }
 
-        if (!response.ok) {
-          setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
-          setResult("");
-          setApiError(
-            payload?.error ?? "Nao foi possivel gerar a resposta agora.",
-          );
-          setResponseSource(null);
-          setResponseNotice(null);
+        if (!res.ok) {
+          setErrors({
+            general:
+              typeof data.error === "string"
+                ? data.error
+                : "Erro ao gerar resposta. Tente novamente.",
+          });
           return;
         }
 
-        setGeneratedPrompt(payload?.prompt ?? buildSalesPrompt(cleanFormData));
-        setResult(payload?.responseText ?? "");
-        setApiError(null);
-        setResponseSource(payload?.source ?? "fallback");
-        setResponseNotice(payload?.notice ?? null);
-        return;
-      }
+        const text =
+          (typeof data.response === "string" && data.response) ||
+          (typeof data.content === "string" && data.content) ||
+          (typeof data.message === "string" && data.message) ||
+          (typeof data.responseText === "string" && data.responseText) ||
+          "";
 
-      if (!response.ok) {
-        setResult("");
-        setApiError("Nao foi possivel gerar a resposta agora.");
-        setResponseSource(null);
-        setResponseNotice(null);
-        return;
-      }
-
-      if (!response.body) {
-        throw new Error("A rota nao retornou stream.");
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let streamedText = "";
-
-      setApiError(null);
-      setResponseSource("openai");
-      setResponseNotice(null);
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
+        if (!text.trim()) {
+          setErrors({
+            general:
+              "Nenhum texto foi retornado. Tente novamente em alguns instantes.",
+          });
+          return;
         }
 
-        const chunk = decoder.decode(value, { stream: true });
-
-        if (!chunk) {
-          continue;
-        }
-
-        streamedText += chunk;
-        setResult((currentResult) => currentResult + chunk);
-      }
-
-      const finalChunk = decoder.decode();
-
-      if (finalChunk) {
-        streamedText += finalChunk;
-        setResult((currentResult) => currentResult + finalChunk);
-      }
-
-      if (!streamedText.trim()) {
-        const prompt = buildSalesPrompt(cleanFormData);
-
-        setGeneratedPrompt(prompt);
-        setResult(buildFallbackResponse(cleanFormData, prompt));
-        setApiError(null);
-        setResponseSource("fallback");
-        setResponseNotice(
-          "Resposta local gerada porque a OpenAI nao retornou texto utilizavel.",
-        );
+        setResult(text);
       }
     } catch {
-      const prompt = buildSalesPrompt(cleanFormData);
-
-      setGeneratedPrompt(prompt);
-      setResult(buildFallbackResponse(cleanFormData, prompt));
-      setApiError(null);
-      setResponseSource("fallback");
-      setResponseNotice(
-        "Resposta local gerada porque a rota nao conseguiu concluir a chamada.",
-      );
+      setErrors({ general: "Erro ao gerar resposta. Tente novamente." });
     } finally {
       setIsLoading(false);
     }
   }
 
-  const inputClassName = "field-control";
-  const selectClassName = `${inputClassName} field-control-select`;
-  const textAreaClassName = `${inputClassName} field-control-textarea`;
-  const pipelineState = [
-    true,
-    Boolean(generatedPrompt),
-    Boolean(result || apiError || isLoading),
-  ];
-  const responseCardClassName = `panel-shell panel-soft response-panel p-7 sm:p-9${
-    result || apiError || isLoading
-      ? " response-panel-active surface-reveal"
-      : ""
-  }`;
-
   return (
-    <main className="min-h-screen overflow-hidden">
-      <div className="background-grid" />
-      <div className="background-glow background-glow-left" />
-      <div className="background-glow background-glow-right" />
-      <div className="background-noise" />
+    <div
+      className="app-shell"
+      style={{
+        display: "flex",
+        height: "100vh",
+        background: "var(--bg-0)",
+        overflow: "hidden",
+      }}
+    >
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap');
 
-      <section className="mx-auto flex min-h-screen w-full max-w-7xl flex-col gap-12 px-4 py-7 sm:px-6 sm:py-10 lg:px-10 lg:py-12">
-        <div className="grid gap-10 lg:grid-cols-[0.82fr_1.18fr] lg:items-start lg:gap-12">
-          <aside className="space-y-8 animate-enter lg:sticky lg:top-8">
-            <div className="hero-shell">
-              <span className="eyebrow eyebrow-glow">AI sales agent customized</span>
+        *, *::before, *::after {
+          box-sizing: border-box;
+          margin: 0;
+          padding: 0;
+        }
 
-              <div className="space-y-5">
-                <p className="hero-kicker">Ferramenta simples para portfolio</p>
-                <h1 className="max-w-xl text-4xl font-semibold tracking-[-0.07em] text-[var(--foreground)] sm:text-5xl lg:text-[3.85rem] lg:leading-[1]">
-                  Respostas comerciais prontas para usar.
-                </h1>
-                <p className="max-w-lg text-[15px] leading-8 text-[var(--muted)] sm:text-base">
-                  Uma interface clara para preencher o contexto, revisar o
-                  prompt e gerar uma resposta comercial no mesmo fluxo.
-                </p>
-              </div>
+        :root {
+          --bg-0: #05080F;
+          --bg-1: #090D18;
+          --bg-2: #0C1120;
+          --bg-glass: rgba(9, 13, 24, 0.7);
+          --accent: #0A84FF;
+          --accent-dim: rgba(10, 132, 255, 0.12);
+          --accent-border: rgba(10, 132, 255, 0.25);
+          --accent-glow: rgba(10, 132, 255, 0.08);
+          --border: rgba(255, 255, 255, 0.06);
+          --border-strong: rgba(255, 255, 255, 0.1);
+          --text-0: #FFFFFF;
+          --text-1: #8E8E93;
+          --text-2: #48484A;
+          --success: #30D158;
+          --error: #FF453A;
+          --font: 'DM Sans', sans-serif;
+          --font-mono: 'DM Mono', monospace;
+        }
 
-              <div className="flex flex-wrap gap-2">
-                <span className="mini-chip mini-chip-quiet">OpenAI</span>
-                <span className="mini-chip mini-chip-quiet">Prompt local</span>
-                <span className="mini-chip mini-chip-quiet">Fallback local</span>
-              </div>
+        html {
+          background: var(--bg-0);
+        }
+
+        body {
+          font-family: var(--font);
+          background: var(--bg-0);
+          color: var(--text-0);
+          -webkit-font-smoothing: antialiased;
+          overflow: hidden;
+        }
+
+        input, select, textarea, button {
+          font-family: var(--font);
+        }
+
+        select option {
+          background: #0C1120;
+          color: white;
+        }
+
+        textarea {
+          resize: none;
+        }
+
+        ::-webkit-scrollbar {
+          width: 4px;
+        }
+        ::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: var(--border-strong);
+          border-radius: 4px;
+        }
+
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes spin {
+          to { transform: rotate(360deg); }
+        }
+
+        @keyframes pulse {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.4; }
+        }
+
+        @keyframes shimmer {
+          from { background-position: -200% 0; }
+          to   { background-position: 200% 0; }
+        }
+
+        .skeleton {
+          background: linear-gradient(
+            90deg,
+            var(--bg-2) 25%,
+            rgba(10,132,255,0.06) 50%,
+            var(--bg-2) 75%
+          );
+          background-size: 200% 100%;
+          animation: shimmer 1.8s infinite;
+          border-radius: 6px;
+        }
+
+        .result-text {
+          animation: fadeUp 0.35s ease forwards;
+        }
+
+        .spinner {
+          width: 14px;
+          height: 14px;
+          border: 2px solid rgba(255,255,255,0.2);
+          border-top-color: white;
+          border-radius: 50%;
+          animation: spin 0.7s linear infinite;
+          display: inline-block;
+        }
+
+        .field-label {
+          font-size: 11px;
+          font-weight: 500;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: var(--text-1);
+          margin-bottom: 6px;
+        }
+
+        .input-base {
+          width: 100%;
+          background: var(--bg-2);
+          border: 1px solid var(--border);
+          border-radius: 10px;
+          padding: 11px 14px;
+          color: var(--text-0);
+          font-size: 14px;
+          font-weight: 400;
+          line-height: 1.5;
+          outline: none;
+          transition: border-color 0.15s, box-shadow 0.15s;
+          appearance: none;
+        }
+
+        .input-base:focus {
+          border-color: var(--accent-border);
+          box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .input-base::placeholder {
+          color: var(--text-2);
+        }
+
+        .card {
+          background: var(--bg-1);
+          border: 1px solid var(--border);
+          border-radius: 16px;
+          padding: 24px;
+          transition: border-color 0.2s, box-shadow 0.2s;
+        }
+
+        .card:hover {
+          border-color: var(--border-strong);
+        }
+
+        .btn-primary {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          background: var(--accent);
+          color: white;
+          border: none;
+          border-radius: 10px;
+          padding: 11px 22px;
+          font-size: 14px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: opacity 0.15s, box-shadow 0.15s;
+          white-space: nowrap;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+          opacity: 0.88;
+          box-shadow: 0 0 24px rgba(10,132,255,0.35);
+        }
+
+        .btn-primary:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
+        }
+
+        .btn-ghost {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: transparent;
+          color: var(--text-1);
+          border: 1px solid var(--border);
+          border-radius: 8px;
+          padding: 7px 14px;
+          font-size: 13px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: color 0.15s, border-color 0.15s;
+        }
+
+        .btn-ghost:hover {
+          color: var(--text-0);
+          border-color: var(--border-strong);
+        }
+
+        .btn-icon {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          background: transparent;
+          border: none;
+          border-radius: 6px;
+          width: 30px;
+          height: 30px;
+          cursor: pointer;
+          color: var(--text-1);
+          transition: color 0.15s, background 0.15s;
+        }
+
+        .btn-icon:hover {
+          color: var(--text-0);
+          background: var(--border);
+        }
+
+        .divider {
+          height: 1px;
+          background: var(--border);
+          margin: 20px 0;
+        }
+
+        .badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 5px;
+          padding: 4px 10px;
+          border-radius: 20px;
+          font-size: 11px;
+          font-weight: 500;
+          letter-spacing: 0.02em;
+        }
+
+        .saved-flash {
+          font-size: 12px;
+          color: var(--success);
+          animation: fadeUp 0.2s ease forwards;
+        }
+
+        .app-shell {
+          position: relative;
+        }
+
+        .app-shell::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background:
+            radial-gradient(circle at 14% 12%, rgba(10,132,255,0.12), transparent 28%),
+            radial-gradient(circle at 84% 8%, rgba(255,255,255,0.035), transparent 18%);
+          pointer-events: none;
+        }
+
+        .app-shell > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        .sidebar-shell,
+        .top-bar,
+        .card {
+          backdrop-filter: blur(18px);
+        }
+
+        .card {
+          background: linear-gradient(180deg, rgba(12,17,32,0.9), rgba(9,13,24,0.96));
+          box-shadow: 0 24px 60px rgba(0,0,0,0.28);
+          position: relative;
+          overflow: hidden;
+        }
+
+        .card::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 24%);
+          pointer-events: none;
+        }
+
+        .card > * {
+          position: relative;
+          z-index: 1;
+        }
+
+        .response-card {
+          overflow: hidden;
+        }
+
+        @media (max-width: 920px) {
+          body {
+            overflow: auto;
+          }
+
+          .app-shell {
+            flex-direction: column !important;
+            height: 100dvh !important;
+          }
+
+          .sidebar-shell {
+            width: 100% !important;
+            border-right: none !important;
+            border-bottom: 1px solid var(--border);
+            padding: 20px 18px !important;
+          }
+
+          .top-bar {
+            padding: 0 18px !important;
+          }
+
+          .scroll-area {
+            padding: 18px !important;
+          }
+        }
+      `}</style>
+
+      <div
+        className="sidebar-shell"
+        style={{
+          width: "260px",
+          flexShrink: 0,
+          background: "var(--bg-1)",
+          borderRight: "1px solid var(--border)",
+          display: "flex",
+          flexDirection: "column",
+          padding: "24px 20px",
+          overflowY: "auto",
+          gap: 0,
+        }}
+      >
+        <div style={{ marginBottom: 32 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <div
+              style={{
+                width: 28,
+                height: 28,
+                borderRadius: 8,
+                background: "linear-gradient(135deg, #0A84FF, #0055D4)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                boxShadow: "0 10px 24px rgba(10,132,255,0.3)",
+              }}
+            >
+              <span style={{ color: "#FFFFFF", fontSize: 12, fontWeight: 700 }}>
+                S
+              </span>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-1">
-              {heroSignals.map((signal) => (
-                <div key={signal.label} className="signal-card">
-                  <p className="metric-label">{signal.label}</p>
-                  <p className="metric-value">{signal.value}</p>
-                  <p className="metric-copy">{signal.description}</p>
-                </div>
-              ))}
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#FFFFFF" }}>
+                SalesAI
+              </span>
+              <span style={{ fontSize: 11, color: "var(--text-2)" }}>
+                Assistente comercial
+              </span>
             </div>
-          </aside>
+          </div>
+        </div>
 
-          <div className="space-y-8 animate-enter-delayed">
-            <div className="panel-shell panel-elevated p-7 sm:p-9">
-              <div className="space-y-10">
-                <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
-                  <div className="max-w-2xl space-y-4">
-                    <span className="status-badge status-badge-soft">
-                      Workspace de geracao
-                    </span>
-                    <h2 className="text-3xl font-semibold tracking-[-0.05em] text-[var(--foreground)] sm:text-[2.15rem]">
-                      Formulario, prompt e resposta em um pipeline unico.
-                    </h2>
-                    <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
-                      Um fluxo simples de produto, com boa leitura e sem
-                      elementos extras fora do que importa.
-                    </p>
-                  </div>
+        <div className="field-label" style={{ marginBottom: 16 }}>
+          PERFIL DO NEGOCIO
+        </div>
 
-                  <div className="flex flex-wrap gap-2">
-                    <span className="mini-chip">Clareza</span>
-                    <span className="mini-chip">Estrutura</span>
-                    <span className="mini-chip">Produto real</span>
-                  </div>
-                </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label
+              className="field-label"
+              htmlFor="company-name"
+              style={{ display: "block" }}
+            >
+              Empresa
+            </label>
+            <input
+              id="company-name"
+              className="input-base"
+              type="text"
+              placeholder="Nome do seu negocio"
+              value={companyName}
+              onChange={(event) => {
+                setCompanyName(event.target.value);
+                setSaved(false);
+                clearError("companyName");
+              }}
+            />
+            {errors.companyName ? (
+              <p style={{ marginTop: 6, fontSize: 11, color: "var(--error)" }}>
+                {errors.companyName}
+              </p>
+            ) : null}
+          </div>
 
-                <div className="pipeline-strip" aria-label="Fluxo do produto">
-                  {pipelineStages.map((stage, index) => (
-                    <div
-                      key={stage.title}
-                      className={`pipeline-node${
-                        pipelineState[index] ? " pipeline-node-active" : ""
-                      }`}
-                    >
-                      <span className="pipeline-node-index">0{index + 1}</span>
-                      <div className="space-y-1">
-                        <p className="pipeline-node-title">{stage.title}</p>
-                        <p className="pipeline-node-copy">{stage.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <form className="space-y-8" onSubmit={handleSubmit} noValidate>
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <label className="field-block">
-                      <span className="field-label">Tipo de negocio</span>
-                      <span className="field-hint">
-                        Define o contexto da resposta comercial.
-                      </span>
-                      <select
-                        name="businessType"
-                        value={formData.businessType}
-                        onChange={handleChange}
-                        aria-invalid={Boolean(errors.businessType)}
-                        className={selectClassName}
-                      >
-                        <option value="">Selecione uma opcao</option>
-                        {businessTypeOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.businessType ? (
-                        <span className="field-error">{errors.businessType}</span>
-                      ) : null}
-                    </label>
-
-                    <label className="field-block">
-                      <span className="field-label">Nome da empresa</span>
-                      <span className="field-hint">
-                        Aparece na personalizacao e no fallback local.
-                      </span>
-                      <input
-                        type="text"
-                        name="companyName"
-                        value={formData.companyName}
-                        onChange={handleChange}
-                        placeholder="Exemplo: Studio Vendas"
-                        aria-invalid={Boolean(errors.companyName)}
-                        className={inputClassName}
-                      />
-                      {errors.companyName ? (
-                        <span className="field-error">{errors.companyName}</span>
-                      ) : null}
-                    </label>
-                  </div>
-
-                  <div className="grid gap-6 md:grid-cols-2">
-                    <label className="field-block">
-                      <span className="field-label">Tom de voz</span>
-                      <span className="field-hint">
-                        Ajusta o estilo da resposta final.
-                      </span>
-                      <select
-                        name="tone"
-                        value={formData.tone}
-                        onChange={handleChange}
-                        aria-invalid={Boolean(errors.tone)}
-                        className={selectClassName}
-                      >
-                        <option value="">Selecione uma opcao</option>
-                        {toneOptions.map((option) => (
-                          <option key={option.value} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                      {errors.tone ? (
-                        <span className="field-error">{errors.tone}</span>
-                      ) : null}
-                    </label>
-
-                    <label className="field-block">
-                      <span className="field-label">Objetivo da resposta</span>
-                      <span className="field-hint">
-                        Exemplo: marcar reuniao, fechar pedido ou tirar duvida.
-                      </span>
-                      <input
-                        type="text"
-                        name="objective"
-                        value={formData.objective}
-                        onChange={handleChange}
-                        placeholder="Exemplo: marcar uma reuniao"
-                        aria-invalid={Boolean(errors.objective)}
-                        className={inputClassName}
-                      />
-                      {errors.objective ? (
-                        <span className="field-error">{errors.objective}</span>
-                      ) : null}
-                    </label>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleSaveBusinessConfig}
-                      className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-white/80 px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-white"
-                    >
-                      Salvar como padrao
-                    </button>
-                    {isSaveConfirmationVisible ? (
-                      <span
-                        className="text-sm font-medium text-[var(--muted)]"
-                        aria-live="polite"
-                      >
-                        Salvo!
-                      </span>
-                    ) : null}
-                  </div>
-
-                  <label className="field-block">
-                    <span className="field-label">Mensagem do cliente</span>
-                    <span className="field-hint">
-                      Cole a mensagem original para gerar uma resposta mais util.
-                    </span>
-                    <textarea
-                      name="customerMessage"
-                      value={formData.customerMessage}
-                      onChange={handleChange}
-                      placeholder="Cole aqui a mensagem recebida do cliente."
-                      aria-invalid={Boolean(errors.customerMessage)}
-                      className={textAreaClassName}
-                    />
-                    {errors.customerMessage ? (
-                      <span className="field-error">
-                        {errors.customerMessage}
-                      </span>
-                    ) : null}
-                  </label>
-
-                  <div className="panel-divider flex flex-col gap-5 pt-8 md:flex-row md:items-center md:justify-between">
-                    <div className="space-y-1">
-                      <p className="text-sm font-semibold text-[var(--foreground)]">
-                        Pronto para gerar
-                      </p>
-                      <p className="text-sm leading-7 text-[var(--muted)]">
-                        O envio monta o prompt, chama a rota e devolve a
-                        resposta na mesma tela.
-                      </p>
-                    </div>
-
-                    <button
-                      type="submit"
-                      disabled={isLoading}
-                      className={`button-primary min-w-[220px]${
-                        isLoading ? " cursor-not-allowed opacity-90" : ""
-                      }`}
-                    >
-                      <span
-                        className={`button-dot${
-                          isLoading ? " button-dot-loading" : ""
-                        }`}
-                      />
-                      <span className={isLoading ? "animate-pulse" : ""}>
-                        {isLoading ? "Gerando..." : "Gerar resposta"}
-                      </span>
-                    </button>
-                  </div>
-                </form>
-              </div>
+          <div>
+            <label
+              className="field-label"
+              htmlFor="business-type"
+              style={{ display: "block" }}
+            >
+              Segmento
+            </label>
+            <div style={{ position: "relative" }}>
+              <select
+                id="business-type"
+                className="input-base"
+                style={{ paddingRight: 38 }}
+                value={businessType}
+                onChange={(event) => {
+                  setBusinessType(event.target.value);
+                  setSaved(false);
+                  clearError("businessType");
+                }}
+              >
+                {businessOptions.map((option) => (
+                  <option key={option.value || "placeholder"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--text-1)",
+                  pointerEvents: "none",
+                }}
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
             </div>
+            {errors.businessType ? (
+              <p style={{ marginTop: 6, fontSize: 11, color: "var(--error)" }}>
+                {errors.businessType}
+              </p>
+            ) : null}
+          </div>
 
-            {submittedData ? (
-              <div className="space-y-7">
-                <div className="panel-shell panel-soft p-7 sm:p-9">
-                  <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-3">
-                      <span className="status-badge status-badge-soft">
-                        Entrada capturada
-                      </span>
-                      <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)] sm:text-[1.9rem]">
-                        Resumo do envio
-                      </h3>
-                      <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
-                        Os dados principais ficam organizados antes do prompt e
-                        da resposta final.
-                      </p>
-                    </div>
-
-                    <span className="mini-chip mini-chip-quiet">
-                      Revisao rapida
-                    </span>
-                  </div>
-
-                  <div className="summary-grid mt-7">
-                    {summaryFields.map((field) => (
-                      <div key={field.key} className="summary-item">
-                        <p className="summary-label">{field.label}</p>
-                        <p className="summary-value">
-                          {field.key === "businessType"
-                            ? getOptionLabel(
-                                submittedData.businessType,
-                                businessTypeOptions,
-                              )
-                            : field.key === "tone"
-                              ? getOptionLabel(submittedData.tone, toneOptions)
-                              : submittedData[field.key]}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="summary-message mt-6">
-                    <p className="summary-label">Mensagem do cliente</p>
-                    <p className="mt-3 whitespace-pre-wrap text-sm leading-8 text-[var(--foreground)] sm:text-base">
-                      {submittedData.customerMessage}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="panel-shell panel-dark p-7 sm:p-9">
-                  <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="space-y-3">
-                      <span className="status-badge status-badge-dark">
-                        Prompt gerado
-                      </span>
-                      <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)] sm:text-[1.9rem]">
-                        Base interna usada na geracao
-                      </h3>
-                      <p className="text-sm leading-7 text-[var(--muted)] sm:text-base">
-                        O prompt abaixo mostra como o sistema organizou o
-                        contexto antes de gerar a resposta.
-                      </p>
-                    </div>
-
-                    <span className="mini-chip mini-chip-dark">Regra local</span>
-                  </div>
-
-                  <pre className="prompt-window">{generatedPrompt}</pre>
-                </div>
-
-                <div className={responseCardClassName}>
-                  <div className="mx-auto w-full max-w-[660px] space-y-7">
-                    <div className="space-y-2">
-                      <span className="status-badge status-badge-soft">
-                        Resposta final
-                      </span>
-                      <h3 className="text-2xl font-semibold tracking-[-0.03em] text-[var(--foreground)] sm:text-[2rem]">
-                        Saida pronta para revisar
-                      </h3>
-                    </div>
-                  </div>
-
-                  {apiError ? (
-                    <div className="error-surface w-full rounded-[1.75rem] p-7 shadow-[0_14px_36px_rgba(15,23,42,0.06)] sm:p-8">
-                      {apiError}
-                    </div>
-                  ) : isLoading && !result ? (
-                    <div className="empty-surface w-full rounded-[1.75rem] p-7 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:p-8">
-                      <div
-                        className="space-y-4"
-                        aria-live="polite"
-                        aria-label="Gerando resposta"
-                      >
-                        <div className="h-4 w-full rounded bg-gray-200 animate-pulse" />
-                        <div className="h-4 w-5/6 rounded bg-gray-200 animate-pulse" />
-                        <div className="h-4 w-2/3 rounded bg-gray-200 animate-pulse" />
-                      </div>
-                    </div>
-                  ) : result ? (
-                    <div
-                      className={`response-surface w-full rounded-[1.75rem] p-7 shadow-[0_16px_40px_rgba(15,23,42,0.08)] transition-opacity duration-500 sm:p-8 ${
-                        isResultVisible ? "opacity-100" : "opacity-0"
-                      }`}
-                      aria-live="polite"
-                    >
-                      <p className="whitespace-pre-wrap text-left text-[15px] leading-[1.68] text-[var(--foreground)] sm:text-base sm:leading-[1.68]">
-                        {result}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="empty-surface w-full rounded-[1.75rem] p-7 shadow-[0_12px_30px_rgba(15,23,42,0.05)] sm:p-8">
-                      {isLoading
-                        ? "A resposta esta sendo gerada."
-                        : "A resposta aparecera aqui depois do envio."}
-                    </div>
-                  )}
-                </div>
-              </div>
+          <div>
+            <label
+              className="field-label"
+              htmlFor="tone"
+              style={{ display: "block" }}
+            >
+              Tom de voz
+            </label>
+            <div style={{ position: "relative" }}>
+              <select
+                id="tone"
+                className="input-base"
+                style={{ paddingRight: 38 }}
+                value={tone}
+                onChange={(event) => {
+                  setTone(event.target.value);
+                  setSaved(false);
+                  clearError("tone");
+                }}
+              >
+                {toneOptions.map((option) => (
+                  <option key={option.value || "placeholder"} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                style={{
+                  position: "absolute",
+                  right: 12,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  color: "var(--text-1)",
+                  pointerEvents: "none",
+                }}
+              >
+                <path d="m6 9 6 6 6-6" />
+              </svg>
+            </div>
+            {errors.tone ? (
+              <p style={{ marginTop: 6, fontSize: 11, color: "var(--error)" }}>
+                {errors.tone}
+              </p>
             ) : null}
           </div>
         </div>
-      </section>
-    </main>
+
+        <div style={{ marginTop: 16, minHeight: 34 }}>
+          {!saved ? (
+            <button
+              className="btn-ghost"
+              style={{ width: "100%", justifyContent: "center" }}
+              onClick={handleSaveProfile}
+              type="button"
+            >
+              Salvar perfil
+            </button>
+          ) : (
+            <span className="saved-flash">✓ Perfil salvo</span>
+          )}
+        </div>
+
+        <div style={{ flex: 1 }} />
+
+        <div className="field-label" style={{ marginBottom: 16 }}>
+          COMO FUNCIONA
+        </div>
+
+        <div>
+          {workflowSteps.map((step, index) => (
+            <div
+              key={step}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 10,
+                marginBottom: index === workflowSteps.length - 1 ? 0 : 10,
+              }}
+            >
+              <div
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: "50%",
+                  background: "var(--accent-dim)",
+                  border: "1px solid var(--accent-border)",
+                  color: "var(--accent)",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {index + 1}
+              </div>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "var(--text-2)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {step}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div
+        className="right-panel"
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          className="top-bar"
+          style={{
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 28px",
+            borderBottom: "1px solid var(--border)",
+            background: "var(--bg-1)",
+            height: 52,
+          }}
+        >
+          <span style={{ fontSize: 14, fontWeight: 600, color: "#FFFFFF" }}>
+            Gerador de Respostas
+          </span>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <div
+              className="badge"
+              style={{
+                background: "var(--accent-dim)",
+                border: "1px solid var(--accent-border)",
+                color: "var(--accent)",
+              }}
+            >
+              <span
+                style={{
+                  width: 6,
+                  height: 6,
+                  background: "var(--accent)",
+                  borderRadius: "50%",
+                  display: "inline-flex",
+                }}
+              />
+              GPT-4o
+            </div>
+
+            <div
+              className="badge"
+              style={{
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid var(--border)",
+                color: "var(--text-1)",
+              }}
+            >
+              Streaming
+            </div>
+          </div>
+        </div>
+
+        <div
+          className="scroll-area"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: 28,
+          }}
+        >
+          <div
+            style={{
+              maxWidth: 660,
+              margin: "0 auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 16,
+            }}
+          >
+            <div className="card">
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    style={{ color: "var(--accent)" }}
+                  >
+                    <rect x="2" y="4" width="20" height="16" rx="2" />
+                    <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
+                  </svg>
+                  <span className="field-label" style={{ marginBottom: 0 }}>
+                    MENSAGEM DO CLIENTE
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <div>
+                  <label
+                    className="field-label"
+                    htmlFor="objective"
+                    style={{ display: "block" }}
+                  >
+                    Contexto
+                  </label>
+                  <input
+                    id="objective"
+                    className="input-base"
+                    type="text"
+                    placeholder="Ex: cliente pedindo desconto via WhatsApp"
+                    value={objective}
+                    onChange={(event) => {
+                      setObjective(event.target.value);
+                      clearError("objective");
+                    }}
+                  />
+                  {errors.objective ? (
+                    <p
+                      style={{ marginTop: 6, fontSize: 11, color: "var(--error)" }}
+                    >
+                      {errors.objective}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label
+                    className="field-label"
+                    htmlFor="client-message"
+                    style={{ display: "block" }}
+                  >
+                    Mensagem do cliente
+                  </label>
+                  <textarea
+                    id="client-message"
+                    className="input-base"
+                    rows={5}
+                    style={{ minHeight: 110 }}
+                    placeholder="Cole aqui a mensagem exata do cliente..."
+                    value={clientMessage}
+                    onChange={(event) => {
+                      setClientMessage(event.target.value);
+                      clearError("clientMessage");
+                    }}
+                  />
+                  {errors.clientMessage ? (
+                    <p
+                      style={{ marginTop: 6, fontSize: 11, color: "var(--error)" }}
+                    >
+                      {errors.clientMessage}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  alignItems: "center",
+                  gap: 12,
+                  marginTop: 20,
+                }}
+              >
+                {errors.general ? (
+                  <span
+                    style={{
+                      marginRight: "auto",
+                      fontSize: 12,
+                      color: "var(--error)",
+                    }}
+                  >
+                    {errors.general}
+                  </span>
+                ) : null}
+
+                <button
+                  className="btn-primary"
+                  disabled={isLoading}
+                  onClick={() => {
+                    void handleSubmit();
+                  }}
+                  type="button"
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="spinner" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      Gerar resposta
+                      <svg
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      >
+                        <path d="M5 12h14M12 5l7 7-7 7" />
+                      </svg>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="card response-card" style={{ minHeight: 200 }}>
+              {result === "" && !isLoading ? (
+                <div
+                  style={{
+                    minHeight: 200,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    flexDirection: "column",
+                  }}
+                >
+                  <div style={{ position: "relative" }}>
+                    <div
+                      style={{
+                        position: "absolute",
+                        width: 120,
+                        height: 120,
+                        background: "var(--accent-dim)",
+                        borderRadius: "50%",
+                        filter: "blur(40px)",
+                        top: "50%",
+                        left: "50%",
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+
+                    <div
+                      style={{
+                        position: "relative",
+                        zIndex: 1,
+                        textAlign: "center",
+                      }}
+                    >
+                      <svg
+                        width="28"
+                        height="28"
+                        viewBox="0 0 24 24"
+                        fill="currentColor"
+                        style={{ color: "var(--accent)", opacity: 0.6 }}
+                      >
+                        <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 17l-6.2 4.3 2.4-7.4L2 9.4h7.6z" />
+                      </svg>
+                      <p
+                        style={{
+                          marginTop: 12,
+                          fontSize: 14,
+                          color: "var(--text-1)",
+                        }}
+                      >
+                        Pronto para gerar
+                      </p>
+                      <p
+                        style={{
+                          marginTop: 4,
+                          fontSize: 12,
+                          color: "var(--text-2)",
+                          maxWidth: 240,
+                          marginLeft: "auto",
+                          marginRight: "auto",
+                        }}
+                      >
+                        Preencha os campos e clique em Gerar resposta
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {isLoading && result === "" ? (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      marginBottom: 20,
+                    }}
+                  >
+                    <span
+                      className="spinner"
+                      style={{ borderTopColor: "var(--accent)" }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "var(--accent)",
+                        animation: "pulse 1.5s infinite",
+                      }}
+                    >
+                      Gerando resposta...
+                    </span>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                    }}
+                  >
+                    <div className="skeleton" style={{ height: 14, width: "75%" }} />
+                    <div className="skeleton" style={{ height: 14, width: "100%" }} />
+                    <div className="skeleton" style={{ height: 14, width: "60%" }} />
+                  </div>
+                </div>
+              ) : null}
+
+              {result !== "" ? (
+                <div>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: 16,
+                    }}
+                  >
+                    <span className="field-label" style={{ marginBottom: 0 }}>
+                      RESPOSTA GERADA
+                    </span>
+
+                    <div style={{ display: "flex", gap: 2 }}>
+                      <button
+                        className="btn-icon"
+                        title="Copiar resposta"
+                        type="button"
+                        onClick={() => {
+                          void navigator.clipboard.writeText(result);
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 2000);
+                        }}
+                      >
+                        {copied ? (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            strokeLinecap="round"
+                            style={{ color: "var(--success)" }}
+                          >
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        ) : (
+                          <svg
+                            width="15"
+                            height="15"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <rect x="9" y="2" width="13" height="13" rx="2" />
+                            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        )}
+                      </button>
+
+                      <button
+                        className="btn-icon"
+                        title="Gerar novamente"
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => {
+                          const lastValues = lastValuesRef.current as
+                            | SubmitValues
+                            | null;
+
+                          if (!lastValues) {
+                            return;
+                          }
+
+                          void handleSubmit(lastValues);
+                        }}
+                        style={
+                          isLoading
+                            ? { opacity: 0.45, cursor: "not-allowed" }
+                            : undefined
+                        }
+                      >
+                        <svg
+                          width="15"
+                          height="15"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        >
+                          <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                          <path d="M21 3v5h-5" />
+                          <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                          <path d="M8 16H3v5" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="divider" />
+
+                  <p
+                    className="result-text"
+                    style={{
+                      fontSize: 15,
+                      lineHeight: 1.8,
+                      color: "var(--text-0)",
+                      fontFamily: "var(--font)",
+                      whiteSpace: "pre-wrap",
+                    }}
+                  >
+                    {result}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

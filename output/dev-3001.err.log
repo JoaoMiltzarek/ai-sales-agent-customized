@@ -1,0 +1,8 @@
+⨯ Another next dev server is already running.
+
+- Local:        http://localhost:3000
+- PID:          11568
+- Dir:          C:\Users\charu\agent training\ai-sales-agent-customized
+- Log:          .next\dev\logs\next-development.log
+
+Run taskkill /PID 11568 /F to stop it.
