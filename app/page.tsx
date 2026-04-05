@@ -1,9 +1,10 @@
 "use client";
 
-import { ChangeEvent, FormEvent, useEffect, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { buildSalesPrompt } from "../lib/buildSalesPrompt";
 import { buildFallbackResponse } from "../lib/buildFallbackResponse";
 import { generateRequestMessages } from "../lib/schemas";
+import { loadBusinessConfig, saveBusinessConfig } from "../lib/storage";
 import type { FormErrors, GenerateRequest } from "../lib/types";
 
 type GenerateResponsePayload = {
@@ -160,6 +161,34 @@ export default function Home() {
   const [responseNotice, setResponseNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isResultVisible, setIsResultVisible] = useState(false);
+  const [isSaveConfirmationVisible, setIsSaveConfirmationVisible] =
+    useState(false);
+  const saveConfirmationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+
+  useEffect(() => {
+    const savedConfig = loadBusinessConfig();
+
+    if (!savedConfig) {
+      return;
+    }
+
+    setFormData((currentData) => ({
+      ...currentData,
+      businessType: savedConfig.businessType,
+      companyName: savedConfig.companyName,
+      tone: savedConfig.tone,
+    }));
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (saveConfirmationTimeoutRef.current) {
+        clearTimeout(saveConfirmationTimeoutRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!result) {
@@ -192,6 +221,25 @@ export default function Home() {
         [name]: undefined,
       }));
     }
+  }
+
+  function handleSaveBusinessConfig() {
+    saveBusinessConfig({
+      businessType: formData.businessType,
+      companyName: formData.companyName,
+      tone: formData.tone,
+    });
+
+    setIsSaveConfirmationVisible(true);
+
+    if (saveConfirmationTimeoutRef.current) {
+      clearTimeout(saveConfirmationTimeoutRef.current);
+    }
+
+    saveConfirmationTimeoutRef.current = setTimeout(() => {
+      setIsSaveConfirmationVisible(false);
+      saveConfirmationTimeoutRef.current = null;
+    }, 2000);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -530,6 +578,24 @@ export default function Home() {
                         <span className="field-error">{errors.objective}</span>
                       ) : null}
                     </label>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleSaveBusinessConfig}
+                      className="inline-flex items-center rounded-full border border-[var(--border-strong)] bg-white/80 px-4 py-2 text-sm font-semibold text-[var(--foreground)] transition hover:bg-white"
+                    >
+                      Salvar como padrao
+                    </button>
+                    {isSaveConfirmationVisible ? (
+                      <span
+                        className="text-sm font-medium text-[var(--muted)]"
+                        aria-live="polite"
+                      >
+                        Salvo!
+                      </span>
+                    ) : null}
                   </div>
 
                   <label className="field-block">
