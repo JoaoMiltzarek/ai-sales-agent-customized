@@ -9,7 +9,7 @@ MVP para gerar respostas comerciais personalizadas por nicho, tom de voz e objet
 
 ## 🌐 Live Demo
 
-https://ai-sales-agent-customized-qly5zvjwk.vercel.app/
+https://ai-sales-agent-customized.vercel.app/
 
 ## 📷 Preview do produto
 
